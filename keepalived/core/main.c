@@ -2317,8 +2317,10 @@ keepalived_main(int argc, char **argv)
 	}
 
 	/* daemonize process */
+	pid_t main_pid;
 	if (!__test_bit(DONT_FORK_BIT, &debug) &&
-	    xdaemon(false, false, true) > 0) {
+	    (main_pid = xdaemon(false, false, true)) > 0) {
+		pidfile_write(main_pidfile, main_pid);
 		closelog();
 		FREE_CONST_PTR(config_id);
 		FREE_PTR(orig_core_dump_pattern);
@@ -2353,9 +2355,20 @@ keepalived_main(int argc, char **argv)
 		config_test_exit();
 	}
 
-	/* write the father's pidfile */
-	if (!pidfile_write(main_pidfile, getpid()))
+	/* check to make sure parent wrote pidfile */
+	int checked_pid;
+	FILE *pidfile;
+	pidfile = fopen(main_pidfile, "r");
+	if (pidfile) {
+		fscanf(pidfile, "%d", &checked_pid);
+		fclose(pidfile);
+		if (checked_pid != (main_pid = getpid())) {
+			log_message(LOG_INFO, "keepalived_main : pid in %s (%d) does not match expected pid (%d)", main_pidfile, checked_pid, main_pid);
+			goto end;
+		}
+	} else {
 		goto end;
+	}
 
 	if (!global_data->max_auto_priority)
 		log_message(LOG_INFO, "NOTICE: setting config option max_auto_priority should result in better keepalived performance");
